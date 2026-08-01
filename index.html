@@ -134,23 +134,20 @@
     </div>
 
     <div class="send">
-      <p class="send-title">Gerar PDF e enviar o resultado</p>
-      <p class="send-sub">Baixa um PDF com o seu mapa e abre o Gmail com o e-mail já preenchido para o mentorado, com você em cópia. Basta anexar o PDF e enviar.</p>
+      <p class="send-title">Gerar o PDF e compartilhar o resultado</p>
+      <p class="send-sub">Gera um PDF com o seu mapa e abre a tela de compartilhar do seu aparelho (WhatsApp, e-mail e outros). Você escolhe para quem enviar.</p>
       <div class="field">
         <label for="nome">NOME</label>
         <input id="nome" type="text" autocomplete="name" placeholder="Nome de quem respondeu">
       </div>
-      <div class="field">
-        <label for="email">E-MAIL DE DESTINO</label>
-        <input id="email" type="email" autocomplete="email" placeholder="destinatario@email.com">
-      </div>
       <label class="consent">
         <input type="checkbox" id="consent">
-        <span>Concordo que este resultado seja enviado por e-mail e compartilhado com a mentoria (Alcitá Advisory).</span>
+        <span>Concordo em compartilhar este resultado com a mentoria (Alcitá Advisory).</span>
       </label>
-      <button type="button" class="btn" id="send">Baixar PDF e abrir o Gmail</button>
+      <button type="button" class="btn" id="share">Gerar PDF e compartilhar</button>
+      <a id="pdflink" class="btn secondary" href="#" target="_blank" rel="noopener" style="display:none; text-decoration:none; text-align:center; margin-top:10px;">Abrir o PDF</a>
       <p class="status" id="status"></p>
-      <p class="privacy">O PDF é gerado no seu navegador e o e-mail sai do seu Gmail. Nada é armazenado nesta página.</p>
+      <p class="privacy">O PDF é gerado no seu próprio navegador. Nada é enviado nem armazenado por esta página: quem compartilha, e para quem, é você.</p>
     </div>
 
     <div class="actions">
@@ -167,13 +164,6 @@
 <script>
 (function(){
   "use strict";
-
-  /* ============================================================
-     CONFIGURAÇÃO  (edite esta linha)
-     MENTOR_EMAIL: e-mail da mentora. Entra em cópia (Cc) em todo
-     envio, garantindo que a mentora sempre receba o resultado.
-     ============================================================ */
-  var MENTOR_EMAIL = "Paula.hipolito@alcita.com.br";
 
   var DIMS = {
     astucia:    {name:"Astúcia Social",          def:"Ler o ambiente e as pessoas com precisão.",           wb:"Parte I.A · Leitura de Contexto"},
@@ -361,7 +351,6 @@
     return doc;
   }
 
-  function isEmail(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
   function setStatus(msg, cls){ var el=document.getElementById('status'); el.textContent=msg; el.className='status '+(cls||''); }
 
   function summaryText(nome){
@@ -375,52 +364,78 @@
     return L.join('\n');
   }
 
-  function openGmail(email, subject, body){
-    var url='https://mail.google.com/mail/?view=cm&fs=1'
-      +'&to='+encodeURIComponent(email)
-      +'&cc='+encodeURIComponent(MENTOR_EMAIL)
-      +'&su='+encodeURIComponent(subject)
-      +'&body='+encodeURIComponent(body);
-    window.__lastGmail=url;
-    var win=window.open(url,'_blank');
-    if(!win){ window.location.href=url; }
+  /* Monta o PDF, o nome do arquivo, um objeto File pronto para compartilhar
+     e uma URL para abrir ou baixar o PDF na hora. */
+  var lastPdfUrl=null;
+  function buildPdfFile(nome){
+    var doc=buildPDF(nome);
+    var filename='Autodiagnostico_NavegacaoPolitica_'+slug(nome)+'_'+dateStr()+'.pdf';
+    var blob=doc.output('blob');
+    var file=new File([blob], filename, {type:'application/pdf'});
+    if(lastPdfUrl){ try{ URL.revokeObjectURL(lastPdfUrl); }catch(e){} }
+    var url=URL.createObjectURL(blob);
+    lastPdfUrl=url;
+    return {doc:doc, file:file, filename:filename, url:url};
   }
 
-  document.getElementById('send').addEventListener('click', function(){
+  document.getElementById('share').addEventListener('click', async function(){
     if(!lastResults){ return; }
     var nome=document.getElementById('nome').value.trim();
-    var email=document.getElementById('email').value.trim();
     var consent=document.getElementById('consent').checked;
     if(!nome){ setStatus('Escreva o nome de quem respondeu.', 'err'); return; }
-    if(!isEmail(email)){ setStatus('Confira o e-mail de destino: parece incompleto.', 'err'); return; }
     if(!consent){ setStatus('Marque a caixa de consentimento para continuar.', 'err'); return; }
 
-    var pdfOk=false, filename='';
+    var built;
     try{
-      if(window.jspdf && window.jspdf.jsPDF){
-        var doc=buildPDF(nome);
-        filename='Autodiagnostico_NavegacaoPolitica_'+slug(nome)+'_'+dateStr()+'.pdf';
-        doc.save(filename); pdfOk=true;
+      if(!(window.jspdf && window.jspdf.jsPDF)){ throw new Error('jspdf indisponível'); }
+      built=buildPdfFile(nome);
+    }catch(e){
+      setStatus('Não consegui gerar o PDF neste navegador. Atualize a página e tente de novo.', 'err');
+      return;
+    }
+
+    var shareText=summaryText(nome);
+    var shareTitle='Autodiagnóstico · Navegação Política · '+nome;
+
+    /* Rede de segurança: sempre deixa o PDF pronto para abrir ou baixar,
+       acontecendo o que acontecer no compartilhamento. */
+    var link=document.getElementById('pdflink');
+    link.href=built.url;
+    link.setAttribute('download', built.filename);
+    link.style.display='block';
+
+    /* Celular: abre o menu nativo de compartilhar com o PDF já anexado.
+       WhatsApp, e-mail e outros aparecem ali. Quem responde escolhe para quem
+       enviar (dá para marcar mais de um contato no WhatsApp: a Alcitá e você). */
+    if(navigator.canShare && navigator.canShare({files:[built.file]})){
+      try{
+        await navigator.share({files:[built.file], title:shareTitle, text:shareText});
+        setStatus('Pronto. Na tela que abriu, escolha o WhatsApp e envie para a Alcitá (e para você, se quiser).', 'ok');
+        return;
+      }catch(err){
+        if(err && err.name==='AbortError'){ setStatus('Compartilhamento cancelado. É só tocar no botão de novo quando quiser.', ''); return; }
+        /* Se falhar por outro motivo, segue para o plano de abrir o PDF. */
       }
-    }catch(e){ pdfOk=false; }
+    }
 
-    var subject='Autodiagnóstico · Navegação Política · '+nome;
-    var bodyLines=['Oi!','',summaryText(nome),''];
-    if(pdfOk){ bodyLines.push('(Importante: anexe o arquivo "'+filename+'", que acabou de ser baixado, antes de enviar.)'); bodyLines.push(''); }
-    bodyLines.push('Um abraço,');
-    bodyLines.push('Alcitá Advisory');
-    var body=bodyLines.join('\n');
-
-    if(pdfOk){ setStatus('PDF baixado. O Gmail abre em uma nova aba com o e-mail pronto. Anexe o arquivo e envie.', 'ok'); }
-    else { setStatus('O Gmail abre em uma nova aba com o resumo do resultado.', 'ok'); }
-    openGmail(email, subject, body);
+    /* Sem compartilhar direto: abre o PDF na hora, dentro do próprio visualizador.
+       Ali a pessoa usa o ícone de compartilhar do visualizador para mandar no
+       WhatsApp. O botão "Abrir o PDF" fica visível como reforço. */
+    var win=null;
+    try{ win=window.open(built.url, '_blank'); }catch(e){}
+    if(win){
+      setStatus('Gerei o PDF e abri numa nova aba. Toque no ícone de compartilhar do visualizador (a setinha) e escolha o WhatsApp. Se preferir, use o botão "Abrir o PDF" abaixo.', 'ok');
+    } else {
+      setStatus('Gerei o PDF. Toque em "Abrir o PDF" logo abaixo e, no visualizador, use o ícone de compartilhar para mandar no WhatsApp.', 'ok');
+    }
   });
 
   document.getElementById('redo').addEventListener('click', function(){
     answered={}; lastResults=null;
     var inputs=form.querySelectorAll('input[type=radio]');
     for(var i=0;i<inputs.length;i++){ inputs[i].checked=false; }
-    document.getElementById('nome').value=''; document.getElementById('email').value=''; document.getElementById('consent').checked=false;
+    document.getElementById('nome').value=''; document.getElementById('consent').checked=false;
+    var pl=document.getElementById('pdflink'); pl.style.display='none'; pl.removeAttribute('href');
     setStatus('', '');
     document.getElementById('results').classList.remove('show');
     document.getElementById('form').style.display=''; document.getElementById('actions').style.display='';
